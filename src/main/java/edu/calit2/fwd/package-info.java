@@ -17,4 +17,4 @@
 /**
  * Sample application that provides simple form of reactive forwarding.
  */
-package org.onosproject.fwd;
+package edu.calit2.fwd;
