@@ -19,7 +19,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>edu.calit2</groupId>
+    <groupId>net.calit2</groupId>
     <artifactId>wfwd</artifactId>
     <version>1.0-SNAPSHOT</version>
     <packaging>bundle</packaging>
@@ -28,7 +28,7 @@
 
     <properties>
         <onos.version>1.4.0</onos.version>
-        <onos.app.name>edu.calit2.wfwd</onos.app.name>
+        <onos.app.name>net.calit2.wfwd</onos.app.name>
         <!-- Uncomment to generate ONOS app from this module.
         <onos.app.name>org.foo.app</onos.app.name>
         <onos.app.origin>Foo, Inc.</onos.app.origin>

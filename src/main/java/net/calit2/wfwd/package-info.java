@@ -17,4 +17,4 @@
 /**
  * Sample application that provides simple form of reactive forwarding.
  */
-package edu.calit2.fwd;
+package net.calit2.wfwd;

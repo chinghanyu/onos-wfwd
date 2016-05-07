@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package edu.calit2.fwd;
+package net.calit2.wfwd;
 
 import com.google.common.collect.ImmutableSet;
 import org.apache.felix.scr.annotations.Activate;
@@ -186,7 +186,7 @@ public class ReactiveForwarding {
     @Activate
     public void activate(ComponentContext context) {
         cfgService.registerProperties(getClass());
-        appId = coreService.registerApplication("edu.calit2.fwd");
+        appId = coreService.registerApplication("net.calit2.wfwd");
 
         packetService.addProcessor(processor, PacketProcessor.director(2));
         topologyService.addListener(topologyListener);
