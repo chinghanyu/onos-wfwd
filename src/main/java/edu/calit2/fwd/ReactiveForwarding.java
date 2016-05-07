@@ -186,7 +186,7 @@ public class ReactiveForwarding {
     @Activate
     public void activate(ComponentContext context) {
         cfgService.registerProperties(getClass());
-        appId = coreService.registerApplication("org.onosproject.fwd");
+        appId = coreService.registerApplication("edu.calit2.fwd");
 
         packetService.addProcessor(processor, PacketProcessor.director(2));
         topologyService.addListener(topologyListener);
