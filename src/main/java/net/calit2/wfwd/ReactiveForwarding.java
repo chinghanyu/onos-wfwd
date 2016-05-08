@@ -119,6 +119,10 @@ public class ReactiveForwarding {
 
     private ApplicationId appId;
 
+    @Property(name = "debugMode", boolValue = false,
+            label = "Enable debug messages; default is false")
+    private boolean debugMode = false;
+
     @Property(name = "packetOutOnly", boolValue = false,
             label = "Enable packet-out only forwarding; default is false")
     private boolean packetOutOnly = false;
@@ -150,9 +154,9 @@ public class ReactiveForwarding {
             label = "Enable matching Vlan ID; default is false")
     private boolean matchVlanId = false;
 
-    @Property(name = "matchIpv4Address", boolValue = false,
+    @Property(name = "matchIpv4Address", boolValue = true,
             label = "Enable matching IPv4 Addresses; default is false")
-    private boolean matchIpv4Address = false;
+    private boolean matchIpv4Address = true;
 
     @Property(name = "matchIpv4Dscp", boolValue = false,
             label = "Enable matching IPv4 DSCP and ECN; default is false")
@@ -251,6 +255,12 @@ public class ReactiveForwarding {
      */
     private void readComponentConfiguration(ComponentContext context) {
         Dictionary<?, ?> properties = context.getProperties();
+        boolean debugModeEnabled = isPropertyEnabled(properties, "debugMode");
+        if (debugMode != debugModeEnabled) {
+            debugMode = debugModeEnabled;
+            log.info("Configured. Debug mode is {}",
+                    debugMode ? "enabled" : "disabled");
+        }
         boolean packetOutOnlyEnabled =
                 isPropertyEnabled(properties, "packetOutOnly");
         if (packetOutOnly != packetOutOnlyEnabled) {
