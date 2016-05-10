@@ -29,10 +29,12 @@
     <properties>
         <onos.version>1.4.0</onos.version>
         <onos.app.name>net.calit2.wfwd</onos.app.name>
-        <!-- Uncomment to generate ONOS app from this module.
-        <onos.app.name>org.foo.app</onos.app.name>
-        <onos.app.origin>Foo, Inc.</onos.app.origin>
-        -->
+        <onos.app.origin>Calit2</onos.app.origin>
+        <onos.app.requires>
+            org.onosproject.drivers,
+            org.onosproject.mobility,
+            org.onosproject.openflow
+        </onos.app.requires>
     </properties>
 
     <dependencies>
