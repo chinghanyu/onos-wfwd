@@ -73,6 +73,7 @@ import org.onosproject.net.topology.TopologyService;
 import org.osgi.service.component.ComponentContext;
 import org.slf4j.Logger;
 
+import javax.crypto.Mac;
 import java.util.Dictionary;
 import java.util.HashMap;
 import java.util.List;
@@ -155,7 +156,7 @@ public class ReactiveForwarding {
     private boolean matchVlanId = false;
 
     @Property(name = "matchIpv4Address", boolValue = true,
-            label = "Enable matching IPv4 Addresses; default is false")
+            label = "Enable matching IPv4 Addresses; default is true")
     private boolean matchIpv4Address = true;
 
     @Property(name = "matchIpv4Dscp", boolValue = false,
@@ -299,7 +300,10 @@ public class ReactiveForwarding {
         boolean matchIpv4AddressEnabled =
                 isPropertyEnabled(properties, "matchIpv4Address");
         if (matchIpv4Address != matchIpv4AddressEnabled) {
-            matchIpv4Address = matchIpv4AddressEnabled;
+            //matchIpv4Address = matchIpv4AddressEnabled;
+            // TODO: Put a quick fix here. But we need to come back and check
+            //       why matchIpv4AddressEnabled is always false.
+            matchIpv4Address = true;
             log.info("Configured. Matching IPv4 Addresses is {}",
                      matchIpv4Address ? "enabled" : "disabled");
         }
@@ -441,6 +445,95 @@ public class ReactiveForwarding {
                 return;
             }
 
+            // Filter out non-IPv4 packets
+            if (ethPkt.getEtherType() != Ethernet.TYPE_IPV4) {
+                log.info("Support IPv4 only.");
+                return;
+            }
+
+            // Extract IPv4 payload
+            IPv4 Ipv4Pkt = (IPv4) ethPkt.getPayload();
+
+            // Locate destination edge device by IP
+            IpAddress dstIp = IpAddress.valueOf(Ipv4Pkt.getDestinationAddress());
+            //log.info("dstIp = {}", dstIp.toString());
+            Set <Host> dstHosts = hostService.getHostsByIp(dstIp);
+            if (dstHosts.size() != 1) {
+                // This might due to multi-cast/broadcast IP addresses
+                log.info("dstHosts.size() == {}, flood the context", dstHosts.size());
+                flood(context);
+                return;
+            }
+            Host dstHost = dstHosts.iterator().next();
+            //log.info("dstHost is {}", dstHost.toString());
+
+            // Locate source edge device by IP
+            IpAddress srcIp = IpAddress.valueOf(Ipv4Pkt.getSourceAddress());
+            //log.info("srcIp = {}", srcIp.toString());
+            Set <Host> srcHosts = hostService.getHostsByIp(srcIp);
+            if (srcHosts.size() != 1) {
+                log.info("srcHosts.size() == {}", srcHosts.size());
+            }
+            Host srcHost = srcHosts.iterator().next();
+            //log.info("srcHost is {}", srcHost.toString());
+
+            /* Till here, dstHost and srcHost should be found already. */
+            DeviceId dstDeviceId = dstHost.location().deviceId();
+            DeviceId srcDeviceId = srcHost.location().deviceId();
+            DeviceId currentDeviceId = pkt.receivedFrom().deviceId();
+
+            /* Next step: We concluded that we can allow all packets coming
+             * from ethernet port but should only allow packets that
+             * destinated to the device from Wi-Fi port. This applies to
+             * source nodes, intermediate nodes, and destination nodes.
+             *
+             * Currently there is no way to tell if a port is an ethernet
+             * port or a Wi-Fi port, but we can manually set port 1 always
+             * to be Wi-Fi port and port 2 being the ethernet port.
+             *
+             * TODO: We may need more elegant fixes in the future.
+             */
+            if (pkt.receivedFrom().port().equals(PortNumber.portNumber(1))) {
+                /* If the ethernet frame is coming from port 1 -- Wi-Fi port,
+                 * check whether it is destinated to current node.
+                 */
+                if (!ethPkt.getDestinationMAC().equals(toMacAddress(currentDeviceId))) {
+                    /* Incoming ethernet frame is not destinated to current
+                     * node, bail and return.
+                     */
+                    log.info("packet coming from Wi-Fi port, ethPkt.dstMac = {}, currentDeviceMac = {}, drop the packet",
+                            ethPkt.getDestinationMAC().toString(),
+                            toMacAddress(currentDeviceId).toString());
+                    return;
+                }
+            }
+            log.info("ethPkt.dstMac = {}, currentDeviceMac = {}, keep processing",
+                    ethPkt.getDestinationMAC().toString(),
+                    toMacAddress(currentDeviceId).toString());
+            /* Otherwise, the ethernet frame must come from other ports. Since
+             * we have only one Wi-Fi port on each node, the frame must come
+             * from ethernet port and there is no need to do destination check.
+             */
+
+            /* We need to install different rules on source edge, intermediate
+             * nodes, and destination edge.
+             *
+             * Source edge:
+             *  1. look up for next hop node through topology service;
+             *  2. modify source and destination MAC addresses;
+             *  3. send it to Wi-Fi output port, port 1.
+             *
+             * Intermediate nodes:
+             *  1. look up for next hop node through topology service;
+             *  2. modify source and destination MAC addresses;
+             *  3. send it to incoming port, in_port.
+             *
+             * Destination edge:
+             *  1. recovery source and destination MAC addresses through host
+             *     service;
+             *  2. send it to port that destination host is connected onto.
+             */
+
             HostId id = HostId.hostId(ethPkt.getDestinationMAC());
 
             // Do not process link-local addresses in any way.
@@ -456,7 +549,8 @@ public class ReactiveForwarding {
             }
 
             // Do we know who this is for? If not, flood and bail.
-            Host dst = hostService.getHost(id);
+            //Host dst = hostService.getHost(id);
+            Host dst = dstHost;
             if (dst == null) {
                 flood(context);
                 return;
@@ -465,14 +559,31 @@ public class ReactiveForwarding {
             // Are we on an edge switch that our destination is on? If so,
             // simply forward out to the destination and bail.
             if (pkt.receivedFrom().deviceId().equals(dst.location().deviceId())) {
+                log.info("We are on destination edge");
                 if (!context.inPacket().receivedFrom().port().equals(dst.location().port())) {
-                    installRule(context, dst.location().port());
+                    installDstRule(context, dst.location().port());
+                    //installRule(context, dst.location().port());
                 }
                 return;
             }
 
             // Otherwise, get a set of paths that lead from here to the
             // destination edge switch.
+
+            /* topologyService.getPaths() takes two device IDs as input
+             * arguments and return a set of Path containing all shortest
+             * paths between these two devices. To install rules onto
+             * intermediate nodes, we need to know both current node and
+             * the next-hop node.
+             *
+             * pkt.receivedFrom().deviceId() represents the current node MAC.
+             * dst.location().deviceId() represents the destination node MAC,
+             * which we are not gonna use here. Because we are going to
+             * implement wireless unicast transmission, so the destination
+             * node MAC address is actually the next hop address. Here is the
+             * thing, we can still locate our actual destination node by
+             * looking up into ARP entries with destination IP address.
+             */
             Set<Path> paths =
                     topologyService.getPaths(topologyService.currentTopology(),
                                              pkt.receivedFrom().deviceId(),
@@ -493,10 +604,36 @@ public class ReactiveForwarding {
                 return;
             }
 
+            /* If reaching here, meaning the current node is either source edge
+             * or an intermediate node. We need to input MAC addresses of
+             * current node as well as next hop node. MAC addresses of current
+             * node could be retrieved from context but the only way to get
+             * next hop info is from path.
+             */
+            log.info("We are on source edge or an intermediate node");
+            DeviceId nextHopDeviceId = path.links().get(0).dst().deviceId();
+            installSrcRule(context, path.src().port(), nextHopDeviceId);
             // Otherwise forward and be done with it.
-            installRule(context, path.src().port());
+            //installRule(context, path.src().port());
         }
 
+    }
+
+    private MacAddress toMacAddress(DeviceId deviceId) {
+        // Example of deviceId.toString(): "of:0000000f6002ff6f"
+        // The associated MAC address is "00:0f:60:02:ff:6f"
+        String tmp1 = deviceId.toString().substring(7);
+        String tmp2 = tmp1.substring(0, 2) + ":" + tmp1.substring(2, 4) + ":" + tmp1.substring(4, 6) + ":" +
+                      tmp1.substring(6, 8) + ":" + tmp1.substring(8, 10) + ":" + tmp1.substring(10, 12);
+        //log.info("toMacAddress: deviceId = {}, Mac = {}", deviceId.toString(), tmp2);
+        return MacAddress.valueOf(tmp2);
+    }
+
+    private DeviceId toDeviceId(MacAddress macAddress) {
+        String tmp1 = macAddress.toStringNoColon().toLowerCase();
+        String tmp2 = "of:0000" + tmp1;
+        //log.info("toDeviceId: mac = {}, deviceId = {}", macAddress.toString(), tmp2);
+        return DeviceId.deviceId(tmp2);
     }
 
     // Indicates whether this is a control packet, e.g. LLDP, BDDP
@@ -537,6 +674,352 @@ public class ReactiveForwarding {
     private void packetOut(PacketContext context, PortNumber portNumber) {
         context.treatmentBuilder().setOutput(portNumber);
         context.send();
+    }
+
+    // Install a rule forwarding the packet to the specified port.
+    private void installSrcRule(PacketContext context, PortNumber portNumber, DeviceId nextHopDeviceId) {
+        //
+        // We don't support (yet) buffer IDs in the Flow Service so
+        // packet out first.
+        //
+        Ethernet inPkt = context.inPacket().parsed();
+        TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder();
+
+        // If PacketOutOnly or ARP packet than forward directly to output port
+        if (packetOutOnly || inPkt.getEtherType() == Ethernet.TYPE_ARP) {
+            packetOut(context, portNumber);
+            return;
+        }
+
+        //
+        // If matchDstMacOnly
+        //    Create flows matching dstMac only
+        // Else
+        //    Create flows with default matching and include configured fields
+        //
+        if (matchDstMacOnly) {
+            selectorBuilder.matchEthDst(inPkt.getDestinationMAC());
+        } else {
+            selectorBuilder.matchInPort(context.inPacket().receivedFrom().port())
+                    .matchEthSrc(inPkt.getSourceMAC())
+                    .matchEthDst(inPkt.getDestinationMAC());
+
+            // If configured Match Vlan ID
+            if (matchVlanId && inPkt.getVlanID() != Ethernet.VLAN_UNTAGGED) {
+                selectorBuilder.matchVlanId(VlanId.vlanId(inPkt.getVlanID()));
+            }
+
+            //
+            // If configured and EtherType is IPv4 - Match IPv4 and
+            // TCP/UDP/ICMP fields
+            //
+            if (matchIpv4Address && inPkt.getEtherType() == Ethernet.TYPE_IPV4) {
+                IPv4 ipv4Packet = (IPv4) inPkt.getPayload();
+                byte ipv4Protocol = ipv4Packet.getProtocol();
+                Ip4Prefix matchIp4SrcPrefix =
+                        Ip4Prefix.valueOf(ipv4Packet.getSourceAddress(),
+                                Ip4Prefix.MAX_MASK_LENGTH);
+                Ip4Prefix matchIp4DstPrefix =
+                        Ip4Prefix.valueOf(ipv4Packet.getDestinationAddress(),
+                                Ip4Prefix.MAX_MASK_LENGTH);
+                selectorBuilder.matchEthType(Ethernet.TYPE_IPV4)
+                        .matchIPSrc(matchIp4SrcPrefix)
+                        .matchIPDst(matchIp4DstPrefix);
+
+                if (matchIpv4Dscp) {
+                    byte dscp = ipv4Packet.getDscp();
+                    byte ecn = ipv4Packet.getEcn();
+                    selectorBuilder.matchIPDscp(dscp).matchIPEcn(ecn);
+                }
+
+                if (matchTcpUdpPorts && ipv4Protocol == IPv4.PROTOCOL_TCP) {
+                    TCP tcpPacket = (TCP) ipv4Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv4Protocol)
+                            .matchTcpSrc(TpPort.tpPort(tcpPacket.getSourcePort()))
+                            .matchTcpDst(TpPort.tpPort(tcpPacket.getDestinationPort()));
+                }
+                if (matchTcpUdpPorts && ipv4Protocol == IPv4.PROTOCOL_UDP) {
+                    UDP udpPacket = (UDP) ipv4Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv4Protocol)
+                            .matchUdpSrc(TpPort.tpPort(udpPacket.getSourcePort()))
+                            .matchUdpDst(TpPort.tpPort(udpPacket.getDestinationPort()));
+                }
+                if (matchIcmpFields && ipv4Protocol == IPv4.PROTOCOL_ICMP) {
+                    ICMP icmpPacket = (ICMP) ipv4Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv4Protocol)
+                            .matchIcmpType(icmpPacket.getIcmpType())
+                            .matchIcmpCode(icmpPacket.getIcmpCode());
+                }
+            }
+
+            //
+            // If configured and EtherType is IPv6 - Match IPv6 and
+            // TCP/UDP/ICMP fields
+            //
+            if (matchIpv6Address && inPkt.getEtherType() == Ethernet.TYPE_IPV6) {
+                IPv6 ipv6Packet = (IPv6) inPkt.getPayload();
+                byte ipv6NextHeader = ipv6Packet.getNextHeader();
+                Ip6Prefix matchIp6SrcPrefix =
+                        Ip6Prefix.valueOf(ipv6Packet.getSourceAddress(),
+                                Ip6Prefix.MAX_MASK_LENGTH);
+                Ip6Prefix matchIp6DstPrefix =
+                        Ip6Prefix.valueOf(ipv6Packet.getDestinationAddress(),
+                                Ip6Prefix.MAX_MASK_LENGTH);
+                selectorBuilder.matchEthType(Ethernet.TYPE_IPV6)
+                        .matchIPv6Src(matchIp6SrcPrefix)
+                        .matchIPv6Dst(matchIp6DstPrefix);
+
+                if (matchIpv6FlowLabel) {
+                    selectorBuilder.matchIPv6FlowLabel(ipv6Packet.getFlowLabel());
+                }
+
+                if (matchTcpUdpPorts && ipv6NextHeader == IPv6.PROTOCOL_TCP) {
+                    TCP tcpPacket = (TCP) ipv6Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv6NextHeader)
+                            .matchTcpSrc(TpPort.tpPort(tcpPacket.getSourcePort()))
+                            .matchTcpDst(TpPort.tpPort(tcpPacket.getDestinationPort()));
+                }
+                if (matchTcpUdpPorts && ipv6NextHeader == IPv6.PROTOCOL_UDP) {
+                    UDP udpPacket = (UDP) ipv6Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv6NextHeader)
+                            .matchUdpSrc(TpPort.tpPort(udpPacket.getSourcePort()))
+                            .matchUdpDst(TpPort.tpPort(udpPacket.getDestinationPort()));
+                }
+                if (matchIcmpFields && ipv6NextHeader == IPv6.PROTOCOL_ICMP6) {
+                    ICMP6 icmp6Packet = (ICMP6) ipv6Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv6NextHeader)
+                            .matchIcmpv6Type(icmp6Packet.getIcmpType())
+                            .matchIcmpv6Code(icmp6Packet.getIcmpCode());
+                }
+            }
+        }
+
+        DeviceId currentDeviceId = context.inPacket().receivedFrom().deviceId();
+
+        if (portNumber == context.inPacket().receivedFrom().port()) {
+            /* OWe need to use logical port -- IN_PORT to send incoming packet
+             * out to its incoming port, otherwise OpenFlow/OVS will discard
+             * the packet.
+             */
+            portNumber = PortNumber.IN_PORT;
+        }
+
+        TrafficTreatment treatment = DefaultTrafficTreatment.builder()
+                .setEthSrc(toMacAddress(currentDeviceId))
+                .setEthDst(toMacAddress(nextHopDeviceId))
+                .setOutput(portNumber)
+                .build();
+
+        ForwardingObjective forwardingObjective = DefaultForwardingObjective.builder()
+                .withSelector(selectorBuilder.build())
+                .withTreatment(treatment)
+                .withPriority(flowPriority)
+                .withFlag(ForwardingObjective.Flag.VERSATILE)
+                .fromApp(appId)
+                .makeTemporary(flowTimeout)
+                .add();
+
+        flowObjectiveService.forward(context.inPacket().receivedFrom().deviceId(),
+                forwardingObjective);
+
+        //
+        // If packetOutOfppTable
+        //  Send packet back to the OpenFlow pipeline to match installed flow
+        // Else
+        //  Send packet direction on the appropriate port
+        //
+        if (packetOutOfppTable) {
+            packetOut(context, PortNumber.TABLE);
+        } else {
+            packetOut(context, portNumber);
+        }
+    }
+
+    // Install a rule forwarding the packet to the specified port.
+    private void installDstRule(PacketContext context, PortNumber portNumber) {
+        //
+        // We don't support (yet) buffer IDs in the Flow Service so
+        // packet out first.
+        //
+        Ethernet inPkt = context.inPacket().parsed();
+        TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder();
+
+        // If PacketOutOnly or ARP packet than forward directly to output port
+        if (packetOutOnly || inPkt.getEtherType() == Ethernet.TYPE_ARP) {
+            packetOut(context, portNumber);
+            return;
+        }
+
+        //
+        // If matchDstMacOnly
+        //    Create flows matching dstMac only
+        // Else
+        //    Create flows with default matching and include configured fields
+        //
+        if (matchDstMacOnly) {
+            selectorBuilder.matchEthDst(inPkt.getDestinationMAC());
+        } else {
+            selectorBuilder.matchInPort(context.inPacket().receivedFrom().port())
+                    .matchEthSrc(inPkt.getSourceMAC())
+                    .matchEthDst(inPkt.getDestinationMAC());
+
+            // If configured Match Vlan ID
+            if (matchVlanId && inPkt.getVlanID() != Ethernet.VLAN_UNTAGGED) {
+                selectorBuilder.matchVlanId(VlanId.vlanId(inPkt.getVlanID()));
+            }
+
+            //
+            // If configured and EtherType is IPv4 - Match IPv4 and
+            // TCP/UDP/ICMP fields
+            //
+            if (matchIpv4Address && inPkt.getEtherType() == Ethernet.TYPE_IPV4) {
+                IPv4 ipv4Packet = (IPv4) inPkt.getPayload();
+                byte ipv4Protocol = ipv4Packet.getProtocol();
+                Ip4Prefix matchIp4SrcPrefix =
+                        Ip4Prefix.valueOf(ipv4Packet.getSourceAddress(),
+                                Ip4Prefix.MAX_MASK_LENGTH);
+                Ip4Prefix matchIp4DstPrefix =
+                        Ip4Prefix.valueOf(ipv4Packet.getDestinationAddress(),
+                                Ip4Prefix.MAX_MASK_LENGTH);
+                selectorBuilder.matchEthType(Ethernet.TYPE_IPV4)
+                        .matchIPSrc(matchIp4SrcPrefix)
+                        .matchIPDst(matchIp4DstPrefix);
+
+                if (matchIpv4Dscp) {
+                    byte dscp = ipv4Packet.getDscp();
+                    byte ecn = ipv4Packet.getEcn();
+                    selectorBuilder.matchIPDscp(dscp).matchIPEcn(ecn);
+                }
+
+                if (matchTcpUdpPorts && ipv4Protocol == IPv4.PROTOCOL_TCP) {
+                    TCP tcpPacket = (TCP) ipv4Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv4Protocol)
+                            .matchTcpSrc(TpPort.tpPort(tcpPacket.getSourcePort()))
+                            .matchTcpDst(TpPort.tpPort(tcpPacket.getDestinationPort()));
+                }
+                if (matchTcpUdpPorts && ipv4Protocol == IPv4.PROTOCOL_UDP) {
+                    UDP udpPacket = (UDP) ipv4Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv4Protocol)
+                            .matchUdpSrc(TpPort.tpPort(udpPacket.getSourcePort()))
+                            .matchUdpDst(TpPort.tpPort(udpPacket.getDestinationPort()));
+                }
+                if (matchIcmpFields && ipv4Protocol == IPv4.PROTOCOL_ICMP) {
+                    ICMP icmpPacket = (ICMP) ipv4Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv4Protocol)
+                            .matchIcmpType(icmpPacket.getIcmpType())
+                            .matchIcmpCode(icmpPacket.getIcmpCode());
+                }
+            }
+
+            //
+            // If configured and EtherType is IPv6 - Match IPv6 and
+            // TCP/UDP/ICMP fields
+            //
+            if (matchIpv6Address && inPkt.getEtherType() == Ethernet.TYPE_IPV6) {
+                IPv6 ipv6Packet = (IPv6) inPkt.getPayload();
+                byte ipv6NextHeader = ipv6Packet.getNextHeader();
+                Ip6Prefix matchIp6SrcPrefix =
+                        Ip6Prefix.valueOf(ipv6Packet.getSourceAddress(),
+                                Ip6Prefix.MAX_MASK_LENGTH);
+                Ip6Prefix matchIp6DstPrefix =
+                        Ip6Prefix.valueOf(ipv6Packet.getDestinationAddress(),
+                                Ip6Prefix.MAX_MASK_LENGTH);
+                selectorBuilder.matchEthType(Ethernet.TYPE_IPV6)
+                        .matchIPv6Src(matchIp6SrcPrefix)
+                        .matchIPv6Dst(matchIp6DstPrefix);
+
+                if (matchIpv6FlowLabel) {
+                    selectorBuilder.matchIPv6FlowLabel(ipv6Packet.getFlowLabel());
+                }
+
+                if (matchTcpUdpPorts && ipv6NextHeader == IPv6.PROTOCOL_TCP) {
+                    TCP tcpPacket = (TCP) ipv6Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv6NextHeader)
+                            .matchTcpSrc(TpPort.tpPort(tcpPacket.getSourcePort()))
+                            .matchTcpDst(TpPort.tpPort(tcpPacket.getDestinationPort()));
+                }
+                if (matchTcpUdpPorts && ipv6NextHeader == IPv6.PROTOCOL_UDP) {
+                    UDP udpPacket = (UDP) ipv6Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv6NextHeader)
+                            .matchUdpSrc(TpPort.tpPort(udpPacket.getSourcePort()))
+                            .matchUdpDst(TpPort.tpPort(udpPacket.getDestinationPort()));
+                }
+                if (matchIcmpFields && ipv6NextHeader == IPv6.PROTOCOL_ICMP6) {
+                    ICMP6 icmp6Packet = (ICMP6) ipv6Packet.getPayload();
+                    selectorBuilder.matchIPProtocol(ipv6NextHeader)
+                            .matchIcmpv6Type(icmp6Packet.getIcmpType())
+                            .matchIcmpv6Code(icmp6Packet.getIcmpCode());
+                }
+            }
+        }
+
+        // Extract IPv4 payload
+        IPv4 Ipv4Pkt = (IPv4) context.inPacket().parsed().getPayload();
+
+        // Locate destination edge device by IP
+        IpAddress dstIp = IpAddress.valueOf(Ipv4Pkt.getDestinationAddress());
+        //log.info("dstIp = {}", dstIp.toString());
+        Set <Host> dstHosts = hostService.getHostsByIp(dstIp);
+        if (dstHosts.size() != 1) {
+            // This might due to multi-cast/broadcast IP addresses
+            log.info("dstHosts.size() == {}, flood the context", dstHosts.size());
+            flood(context);
+            return;
+        }
+        Host dstHost = dstHosts.iterator().next();
+        //log.info("dstHost is {}", dstHost.toString());
+
+        // Locate source edge device by IP
+        IpAddress srcIp = IpAddress.valueOf(Ipv4Pkt.getSourceAddress());
+        //log.info("srcIp = {}", srcIp.toString());
+        Set <Host> srcHosts = hostService.getHostsByIp(srcIp);
+        if (srcHosts.size() != 1) {
+            log.info("srcHosts.size() == {}", srcHosts.size());
+        }
+        Host srcHost = srcHosts.iterator().next();
+        //log.info("srcHost is {}", srcHost.toString());
+
+            /* Till here, dstHost and srcHost should be found already. */
+        MacAddress dstMac = dstHost.mac();
+        MacAddress srcMac = srcHost.mac();
+
+        if (portNumber == context.inPacket().receivedFrom().port()) {
+            /* OWe need to use logical port -- IN_PORT to send incoming packet
+             * out to its incoming port, otherwise OpenFlow/OVS will discard
+             * the packet.
+             */
+            portNumber = PortNumber.IN_PORT;
+        }
+
+        TrafficTreatment treatment = DefaultTrafficTreatment.builder()
+                .setEthSrc(srcMac)
+                .setEthDst(dstMac)
+                .setOutput(portNumber)
+                .build();
+
+        ForwardingObjective forwardingObjective = DefaultForwardingObjective.builder()
+                .withSelector(selectorBuilder.build())
+                .withTreatment(treatment)
+                .withPriority(flowPriority)
+                .withFlag(ForwardingObjective.Flag.VERSATILE)
+                .fromApp(appId)
+                .makeTemporary(flowTimeout)
+                .add();
+
+        flowObjectiveService.forward(context.inPacket().receivedFrom().deviceId(),
+                forwardingObjective);
+
+        //
+        // If packetOutOfppTable
+        //  Send packet back to the OpenFlow pipeline to match installed flow
+        // Else
+        //  Send packet direction on the appropriate port
+        //
+        if (packetOutOfppTable) {
+            packetOut(context, PortNumber.TABLE);
+        } else {
+            packetOut(context, portNumber);
+        }
     }
 
     // Install a rule forwarding the packet to the specified port.
