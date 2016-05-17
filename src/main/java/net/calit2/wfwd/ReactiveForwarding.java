@@ -797,7 +797,7 @@ public class ReactiveForwarding {
         DeviceId currentDeviceId = context.inPacket().receivedFrom().deviceId();
 
         if (portNumber == context.inPacket().receivedFrom().port()) {
-            /* OWe need to use logical port -- IN_PORT to send incoming packet
+            /* We need to use logical port -- IN_PORT to send incoming packet
              * out to its incoming port, otherwise OpenFlow/OVS will discard
              * the packet.
              */
@@ -984,7 +984,7 @@ public class ReactiveForwarding {
         MacAddress srcMac = srcHost.mac();
 
         if (portNumber == context.inPacket().receivedFrom().port()) {
-            /* OWe need to use logical port -- IN_PORT to send incoming packet
+            /* We need to use logical port -- IN_PORT to send incoming packet
              * out to its incoming port, otherwise OpenFlow/OVS will discard
              * the packet.
              */
