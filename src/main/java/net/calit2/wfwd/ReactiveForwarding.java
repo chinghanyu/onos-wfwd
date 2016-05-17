@@ -30,6 +30,7 @@ import org.onlab.packet.IPv4;
 import org.onlab.packet.IPv6;
 import org.onlab.packet.Ip4Prefix;
 import org.onlab.packet.Ip6Prefix;
+import org.onlab.packet.IpAddress;
 import org.onlab.packet.MacAddress;
 import org.onlab.packet.TCP;
 import org.onlab.packet.TpPort;
@@ -73,7 +74,6 @@ import org.onosproject.net.topology.TopologyService;
 import org.osgi.service.component.ComponentContext;
 import org.slf4j.Logger;
 
-import javax.crypto.Mac;
 import java.util.Dictionary;
 import java.util.HashMap;
 import java.util.List;
