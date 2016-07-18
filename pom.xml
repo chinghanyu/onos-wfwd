@@ -27,7 +27,7 @@
     <description>Reactive forwarding application for wireless SDNs</description>
 
     <properties>
-        <onos.version>1.4.0</onos.version>
+        <onos.version>1.5.2-SNAPSHOT</onos.version>
         <onos.app.name>net.calit2.wfwd</onos.app.name>
         <onos.app.origin>Calit2</onos.app.origin>
         <onos.app.requires>
