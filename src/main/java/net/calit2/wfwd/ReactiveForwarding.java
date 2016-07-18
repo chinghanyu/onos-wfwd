@@ -605,6 +605,42 @@ public class ReactiveForwarding {
              */
             log.info("We are on source edge or an intermediate node");
             DeviceId nextHopDeviceId = path.links().get(0).dst().deviceId();
+
+            /* We may override next hop selections here */
+            /* Two-hop settings:
+             * A(src) -> D -> C(dst)
+             */
+            //if (currentDeviceId.equals(DeviceId.deviceId("of:0000000f6002ff6f")) &&
+            //        nextHopDeviceId.equals(DeviceId.deviceId("of:0000000f6002fe07"))) {
+            //    nextHopDeviceId = DeviceId.deviceId("of:0000000f6002da55");
+            //}
+            /* C(src) -> B -> A(src) */
+            //if (currentDeviceId.equals(DeviceId.deviceId("of:0000000f6002fe07")) &&
+            //        nextHopDeviceId.equals(DeviceId.deviceId("of:0000000f6002ff6f"))) {
+            //    nextHopDeviceId = DeviceId.deviceId("of:0000000f6002f3c3");
+            //}
+
+            /* Three-hop settings:
+             * A(src) -> D -> B -> C(dst)
+             */
+            if (currentDeviceId.equals(DeviceId.deviceId("of:0000000f6002ff6f")) &&
+                    nextHopDeviceId.equals(DeviceId.deviceId("of:0000000f6002fe07"))) {
+                nextHopDeviceId = DeviceId.deviceId("of:0000000f6002da55");
+            }
+            if (currentDeviceId.equals(DeviceId.deviceId("of:0000000f6002da55")) &&
+                    nextHopDeviceId.equals(DeviceId.deviceId("of:0000000f6002fe07"))) {
+                nextHopDeviceId = DeviceId.deviceId("of:0000000f6002f3c3");
+            }
+            /* C(src) -> B -> D -> A(dst) */
+            if (currentDeviceId.equals(DeviceId.deviceId("of:0000000f6002fe07")) &&
+                    nextHopDeviceId.equals(DeviceId.deviceId("of:0000000f6002ff6f"))) {
+                nextHopDeviceId = DeviceId.deviceId("of:0000000f6002f3c3");
+            }
+            if (currentDeviceId.equals(DeviceId.deviceId("of:0000000f6002f3c3")) &&
+                    nextHopDeviceId.equals(DeviceId.deviceId("of:0000000f6002ff6f"))) {
+                nextHopDeviceId = DeviceId.deviceId("of:0000000f6002da55");
+            }
+
             installSrcRule(context, path.src().port(), nextHopDeviceId);
             // Otherwise forward and be done with it.
             //installRule(context, path.src().port());
@@ -838,7 +874,7 @@ public class ReactiveForwarding {
 
         DeviceId currentDeviceId = context.inPacket().receivedFrom().deviceId();
 
-        if (portNumber == context.inPacket().receivedFrom().port()) {
+        if (context.inPacket().receivedFrom().port().equals(portNumber)) {
             /* We need to use logical port -- IN_PORT to send incoming packet
              * out to its incoming port, otherwise OpenFlow/OVS will discard
              * the packet.
@@ -1025,7 +1061,7 @@ public class ReactiveForwarding {
         MacAddress dstMac = dstHost.mac();
         MacAddress srcMac = srcHost.mac();
 
-        if (portNumber == context.inPacket().receivedFrom().port()) {
+        if (context.inPacket().receivedFrom().port().equals(portNumber)) {
             /* We need to use logical port -- IN_PORT to send incoming packet
              * out to its incoming port, otherwise OpenFlow/OVS will discard
              * the packet.
