@@ -80,6 +80,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static org.slf4j.LoggerFactory.getLogger;
@@ -90,7 +94,7 @@ import static org.slf4j.LoggerFactory.getLogger;
 @Component(immediate = true)
 public class ReactiveForwarding {
 
-    private static final int DEFAULT_TIMEOUT = 10;
+    private static final int DEFAULT_TIMEOUT = 60;
     private static final int DEFAULT_PRIORITY = 10;
 
     private final Logger log = getLogger(getClass());
@@ -187,6 +191,8 @@ public class ReactiveForwarding {
 
     private final TopologyListener topologyListener = new InternalTopologyListener();
 
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private ScheduledFuture<?> future;
 
     @Activate
     public void activate(ComponentContext context) {
@@ -197,6 +203,8 @@ public class ReactiveForwarding {
         topologyService.addListener(topologyListener);
         readComponentConfiguration(context);
         requestIntercepts();
+
+        future = scheduler.scheduleAtFixedRate(this::changeRoute, 10, 10, TimeUnit.SECONDS);
 
         log.info("Started", appId.id());
     }
@@ -209,6 +217,12 @@ public class ReactiveForwarding {
         packetService.removeProcessor(processor);
         topologyService.removeListener(topologyListener);
         processor = null;
+
+        if (future != null) {
+            future.cancel(false);
+        }
+        scheduler.shutdown();
+
         log.info("Stopped");
     }
 
@@ -1558,5 +1572,11 @@ public class ReactiveForwarding {
         public int hashCode() {
             return Objects.hash(src, dst);
         }
+    }
+
+    private void changeRoute() {
+        log.info("changeRoute is called");
+
+
     }
 }
