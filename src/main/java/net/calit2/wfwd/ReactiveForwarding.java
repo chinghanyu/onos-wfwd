@@ -23,37 +23,13 @@ import org.apache.felix.scr.annotations.Modified;
 import org.apache.felix.scr.annotations.Property;
 import org.apache.felix.scr.annotations.Reference;
 import org.apache.felix.scr.annotations.ReferenceCardinality;
-import org.onlab.packet.Ethernet;
-import org.onlab.packet.ICMP;
-import org.onlab.packet.ICMP6;
-import org.onlab.packet.IPv4;
-import org.onlab.packet.IPv6;
-import org.onlab.packet.Ip4Prefix;
-import org.onlab.packet.Ip6Prefix;
-import org.onlab.packet.IpAddress;
-import org.onlab.packet.MacAddress;
-import org.onlab.packet.TCP;
-import org.onlab.packet.TpPort;
-import org.onlab.packet.UDP;
-import org.onlab.packet.VlanId;
+import org.onlab.packet.*;
 import org.onosproject.cfg.ComponentConfigService;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
 import org.onosproject.event.Event;
-import org.onosproject.net.ConnectPoint;
-import org.onosproject.net.DeviceId;
-import org.onosproject.net.Host;
-import org.onosproject.net.HostId;
-import org.onosproject.net.Link;
-import org.onosproject.net.Path;
-import org.onosproject.net.PortNumber;
-import org.onosproject.net.flow.DefaultTrafficSelector;
-import org.onosproject.net.flow.DefaultTrafficTreatment;
-import org.onosproject.net.flow.FlowEntry;
-import org.onosproject.net.flow.FlowRule;
-import org.onosproject.net.flow.FlowRuleService;
-import org.onosproject.net.flow.TrafficSelector;
-import org.onosproject.net.flow.TrafficTreatment;
+import org.onosproject.net.*;
+import org.onosproject.net.flow.*;
 import org.onosproject.net.flow.criteria.Criterion;
 import org.onosproject.net.flow.criteria.EthCriterion;
 import org.onosproject.net.flow.instructions.Instruction;
@@ -74,12 +50,7 @@ import org.onosproject.net.topology.TopologyService;
 import org.osgi.service.component.ComponentContext;
 import org.slf4j.Logger;
 
-import java.util.Dictionary;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -205,6 +176,7 @@ public class ReactiveForwarding {
         requestIntercepts();
 
         future = scheduler.scheduleAtFixedRate(this::changeRoute, 10, 10, TimeUnit.SECONDS);
+        installFixedPath();
 
         log.info("Started", appId.id());
     }
@@ -281,35 +253,35 @@ public class ReactiveForwarding {
         if (packetOutOnly != packetOutOnlyEnabled) {
             packetOutOnly = packetOutOnlyEnabled;
             log.info("Configured. Packet-out only forwarding is {}",
-                     packetOutOnly ? "enabled" : "disabled");
+                    packetOutOnly ? "enabled" : "disabled");
         }
         boolean packetOutOfppTableEnabled =
                 isPropertyEnabled(properties, "packetOutOfppTable");
         if (packetOutOfppTable != packetOutOfppTableEnabled) {
             packetOutOfppTable = packetOutOfppTableEnabled;
             log.info("Configured. Forwarding using OFPP_TABLE port is {}",
-                     packetOutOfppTable ? "enabled" : "disabled");
+                    packetOutOfppTable ? "enabled" : "disabled");
         }
         boolean ipv6ForwardingEnabled =
                 isPropertyEnabled(properties, "ipv6Forwarding");
         if (ipv6Forwarding != ipv6ForwardingEnabled) {
             ipv6Forwarding = ipv6ForwardingEnabled;
             log.info("Configured. IPv6 forwarding is {}",
-                     ipv6Forwarding ? "enabled" : "disabled");
+                    ipv6Forwarding ? "enabled" : "disabled");
         }
         boolean matchDstMacOnlyEnabled =
                 isPropertyEnabled(properties, "matchDstMacOnly");
         if (matchDstMacOnly != matchDstMacOnlyEnabled) {
             matchDstMacOnly = matchDstMacOnlyEnabled;
             log.info("Configured. Match Dst MAC Only is {}",
-                     matchDstMacOnly ? "enabled" : "disabled");
+                    matchDstMacOnly ? "enabled" : "disabled");
         }
         boolean matchVlanIdEnabled =
                 isPropertyEnabled(properties, "matchVlanId");
         if (matchVlanId != matchVlanIdEnabled) {
             matchVlanId = matchVlanIdEnabled;
             log.info("Configured. Matching Vlan ID is {}",
-                     matchVlanId ? "enabled" : "disabled");
+                    matchVlanId ? "enabled" : "disabled");
         }
         boolean matchIpv4AddressEnabled =
                 isPropertyEnabled(properties, "matchIpv4Address");
@@ -319,62 +291,62 @@ public class ReactiveForwarding {
             //       why matchIpv4AddressEnabled is always false.
             matchIpv4Address = true;
             log.info("Configured. Matching IPv4 Addresses is {}",
-                     matchIpv4Address ? "enabled" : "disabled");
+                    matchIpv4Address ? "enabled" : "disabled");
         }
         boolean matchIpv4DscpEnabled =
                 isPropertyEnabled(properties, "matchIpv4Dscp");
         if (matchIpv4Dscp != matchIpv4DscpEnabled) {
             matchIpv4Dscp = matchIpv4DscpEnabled;
             log.info("Configured. Matching IPv4 DSCP and ECN is {}",
-                     matchIpv4Dscp ? "enabled" : "disabled");
+                    matchIpv4Dscp ? "enabled" : "disabled");
         }
         boolean matchIpv6AddressEnabled =
                 isPropertyEnabled(properties, "matchIpv6Address");
         if (matchIpv6Address != matchIpv6AddressEnabled) {
             matchIpv6Address = matchIpv6AddressEnabled;
             log.info("Configured. Matching IPv6 Addresses is {}",
-                     matchIpv6Address ? "enabled" : "disabled");
+                    matchIpv6Address ? "enabled" : "disabled");
         }
         boolean matchIpv6FlowLabelEnabled =
                 isPropertyEnabled(properties, "matchIpv6FlowLabel");
         if (matchIpv6FlowLabel != matchIpv6FlowLabelEnabled) {
             matchIpv6FlowLabel = matchIpv6FlowLabelEnabled;
             log.info("Configured. Matching IPv6 FlowLabel is {}",
-                     matchIpv6FlowLabel ? "enabled" : "disabled");
+                    matchIpv6FlowLabel ? "enabled" : "disabled");
         }
         boolean matchTcpUdpPortsEnabled =
                 isPropertyEnabled(properties, "matchTcpUdpPorts");
         if (matchTcpUdpPorts != matchTcpUdpPortsEnabled) {
             matchTcpUdpPorts = matchTcpUdpPortsEnabled;
             log.info("Configured. Matching TCP/UDP fields is {}",
-                     matchTcpUdpPorts ? "enabled" : "disabled");
+                    matchTcpUdpPorts ? "enabled" : "disabled");
         }
         boolean matchIcmpFieldsEnabled =
                 isPropertyEnabled(properties, "matchIcmpFields");
         if (matchIcmpFields != matchIcmpFieldsEnabled) {
             matchIcmpFields = matchIcmpFieldsEnabled;
             log.info("Configured. Matching ICMP (v4 and v6) fields is {}",
-                     matchIcmpFields ? "enabled" : "disabled");
+                    matchIcmpFields ? "enabled" : "disabled");
         }
         Integer flowTimeoutConfigured =
                 getIntegerProperty(properties, "flowTimeout");
         if (flowTimeoutConfigured == null) {
             log.info("Flow Timeout is not configured, default value is {}",
-                     flowTimeout);
+                    flowTimeout);
         } else {
             flowTimeout = flowTimeoutConfigured;
             log.info("Configured. Flow Timeout is configured to {}",
-                     flowTimeout, " seconds");
+                    flowTimeout, " seconds");
         }
         Integer flowPriorityConfigured =
                 getIntegerProperty(properties, "flowPriority");
         if (flowPriorityConfigured == null) {
             log.info("Flow Priority is not configured, default value is {}",
-                     flowPriority);
+                    flowPriority);
         } else {
             flowPriority = flowPriorityConfigured;
             log.info("Configured. Flow Priority is configured to {}",
-                     flowPriority);
+                    flowPriority);
         }
 
         boolean ignoreIpv4McastPacketsEnabled =
@@ -382,7 +354,7 @@ public class ReactiveForwarding {
         if (ignoreIpv4McastPackets != ignoreIpv4McastPacketsEnabled) {
             ignoreIpv4McastPackets = ignoreIpv4McastPacketsEnabled;
             log.info("Configured. Ignore IPv4 multicast packets is {}",
-                     ignoreIpv4McastPackets ? "enabled" : "disabled");
+                    ignoreIpv4McastPackets ? "enabled" : "disabled");
         }
     }
 
@@ -471,7 +443,7 @@ public class ReactiveForwarding {
             // Locate destination edge device by IP
             IpAddress dstIp = IpAddress.valueOf(Ipv4Pkt.getDestinationAddress());
             //log.info("dstIp = {}", dstIp.toString());
-            Set <Host> dstHosts = hostService.getHostsByIp(dstIp);
+            Set<Host> dstHosts = hostService.getHostsByIp(dstIp);
             if (dstHosts.size() != 1) {
                 // This might due to multi-cast/broadcast IP addresses
                 //log.info("dstHosts.size() == {}, flood the context", dstHosts.size());
@@ -484,7 +456,7 @@ public class ReactiveForwarding {
             // Locate source edge device by IP
             IpAddress srcIp = IpAddress.valueOf(Ipv4Pkt.getSourceAddress());
             //log.info("srcIp = {}", srcIp.toString());
-            Set <Host> srcHosts = hostService.getHostsByIp(srcIp);
+            Set<Host> srcHosts = hostService.getHostsByIp(srcIp);
             if (srcHosts.size() != 1) {
                 log.info("srcHosts.size() == {}", srcHosts.size());
             }
@@ -507,7 +479,7 @@ public class ReactiveForwarding {
              *
              * TODO: We may need more elegant fixes in the future.
              */
-            if(!isIntendedToNode(pkt)) {
+            if (!isIntendedToNode(pkt)) {
                 /* If the packet is not intended for the local device, we should
                  * install a rejection rule with priority greater than 5,
                  * otherwise local nodes will keep sending packets of these kind
@@ -593,8 +565,8 @@ public class ReactiveForwarding {
              */
             Set<Path> paths =
                     topologyService.getPaths(topologyService.currentTopology(),
-                                             pkt.receivedFrom().deviceId(),
-                                             dst.location().deviceId());
+                            pkt.receivedFrom().deviceId(),
+                            dst.location().deviceId());
             if (paths.isEmpty()) {
                 // If there are no paths, flood and bail.
                 flood(context);
@@ -606,7 +578,7 @@ public class ReactiveForwarding {
             Path path = pickForwardPathIfPossible(paths, pkt.receivedFrom().port());
             if (path == null) {
                 log.warn("Don't know where to go from here {} for {} -> {}",
-                         pkt.receivedFrom(), ethPkt.getSourceMAC(), ethPkt.getDestinationMAC());
+                        pkt.receivedFrom(), ethPkt.getSourceMAC(), ethPkt.getDestinationMAC());
                 flood(context);
                 return;
             }
@@ -637,6 +609,7 @@ public class ReactiveForwarding {
             /* Three-hop settings:
              * A(src) -> D -> B -> C(dst)
              */
+            /*
             if (currentDeviceId.equals(DeviceId.deviceId("of:0000000f6002ff6f")) &&
                     nextHopDeviceId.equals(DeviceId.deviceId("of:0000000f6002fe07"))) {
                 nextHopDeviceId = DeviceId.deviceId("of:0000000f6002da55");
@@ -646,6 +619,7 @@ public class ReactiveForwarding {
                 nextHopDeviceId = DeviceId.deviceId("of:0000000f6002f3c3");
             }
             /* C(src) -> B -> D -> A(dst) */
+            /*
             if (currentDeviceId.equals(DeviceId.deviceId("of:0000000f6002fe07")) &&
                     nextHopDeviceId.equals(DeviceId.deviceId("of:0000000f6002ff6f"))) {
                 nextHopDeviceId = DeviceId.deviceId("of:0000000f6002f3c3");
@@ -654,6 +628,7 @@ public class ReactiveForwarding {
                     nextHopDeviceId.equals(DeviceId.deviceId("of:0000000f6002ff6f"))) {
                 nextHopDeviceId = DeviceId.deviceId("of:0000000f6002da55");
             }
+            */
 
             installSrcRule(context, path.src().port(), nextHopDeviceId);
             // Otherwise forward and be done with it.
@@ -667,7 +642,7 @@ public class ReactiveForwarding {
         // The associated MAC address is "00:0f:60:02:ff:6f"
         String tmp1 = deviceId.toString().substring(7);
         String tmp2 = tmp1.substring(0, 2) + ":" + tmp1.substring(2, 4) + ":" + tmp1.substring(4, 6) + ":" +
-                      tmp1.substring(6, 8) + ":" + tmp1.substring(8, 10) + ":" + tmp1.substring(10, 12);
+                tmp1.substring(6, 8) + ":" + tmp1.substring(8, 10) + ":" + tmp1.substring(10, 12);
         //log.info("toMacAddress: deviceId = {}, Mac = {}", deviceId.toString(), tmp2);
         return MacAddress.valueOf(tmp2);
     }
@@ -706,7 +681,7 @@ public class ReactiveForwarding {
              * number is always 1.
              */
             log.info("Packet coming from Ethernet port, ethPkt.dstMac = {}, currentDeviceMac = {}. " +
-                    "Assume it is intended and accept the packet.",
+                            "Assume it is intended and accept the packet.",
                     ethPkt.getDestinationMAC().toString(),
                     toMacAddress(currentDeviceId).toString());
             return true;
@@ -718,7 +693,7 @@ public class ReactiveForwarding {
              * local node's one.
              */
             log.info("Packet coming from Wi-Fi port, ethPkt.dstMac = {}, currentDeviceMac = {}. " +
-                    "It is intended so accept the packet.",
+                            "It is intended so accept the packet.",
                     ethPkt.getDestinationMAC().toString(),
                     toMacAddress(currentDeviceId).toString());
             return true;
@@ -726,14 +701,14 @@ public class ReactiveForwarding {
 
         if (ethPkt.getDestinationMAC().isBroadcast()) {
             log.info("Packet coming from Wi-Fi port, ethPkt.dstMac = {}, currentDeviceMac = {}. " +
-                    "It is broadcast, so accept the packet.",
+                            "It is broadcast, so accept the packet.",
                     ethPkt.getDestinationMAC().toString(),
                     toMacAddress(currentDeviceId).toString());
             return true;
         }
 
         log.info("Packet coming from Wi-Fi port, ethPkt.dstMac = {}, currentDeviceMac = {}. " +
-                "It is neither intended nor broadcast so drop the packet.",
+                        "It is neither intended nor broadcast so drop the packet.",
                 ethPkt.getDestinationMAC().toString(),
                 toMacAddress(currentDeviceId).toString());
         return false;
@@ -755,7 +730,7 @@ public class ReactiveForwarding {
     // Floods the specified packet if permissible.
     private void flood(PacketContext context) {
         if (topologyService.isBroadcastPoint(topologyService.currentTopology(),
-                                             context.inPacket().receivedFrom())) {
+                context.inPacket().receivedFrom())) {
             packetOut(context, PortNumber.FLOOD);
         } else {
             context.block();
@@ -1051,7 +1026,7 @@ public class ReactiveForwarding {
         // Locate destination edge device by IP
         IpAddress dstIp = IpAddress.valueOf(Ipv4Pkt.getDestinationAddress());
         //log.info("dstIp = {}", dstIp.toString());
-        Set <Host> dstHosts = hostService.getHostsByIp(dstIp);
+        Set<Host> dstHosts = hostService.getHostsByIp(dstIp);
         if (dstHosts.size() != 1) {
             // This might due to multi-cast/broadcast IP addresses
             //log.info("dstHosts.size() == {}, flood the context", dstHosts.size());
@@ -1064,7 +1039,7 @@ public class ReactiveForwarding {
         // Locate source edge device by IP
         IpAddress srcIp = IpAddress.valueOf(Ipv4Pkt.getSourceAddress());
         //log.info("srcIp = {}", srcIp.toString());
-        Set <Host> srcHosts = hostService.getHostsByIp(srcIp);
+        Set<Host> srcHosts = hostService.getHostsByIp(srcIp);
         if (srcHosts.size() != 1 && debugMode) {
             log.info("srcHosts.size() == {}", srcHosts.size());
         }
@@ -1303,10 +1278,10 @@ public class ReactiveForwarding {
                 byte ipv4Protocol = ipv4Packet.getProtocol();
                 Ip4Prefix matchIp4SrcPrefix =
                         Ip4Prefix.valueOf(ipv4Packet.getSourceAddress(),
-                                          Ip4Prefix.MAX_MASK_LENGTH);
+                                Ip4Prefix.MAX_MASK_LENGTH);
                 Ip4Prefix matchIp4DstPrefix =
                         Ip4Prefix.valueOf(ipv4Packet.getDestinationAddress(),
-                                          Ip4Prefix.MAX_MASK_LENGTH);
+                                Ip4Prefix.MAX_MASK_LENGTH);
                 selectorBuilder.matchEthType(Ethernet.TYPE_IPV4)
                         .matchIPSrc(matchIp4SrcPrefix)
                         .matchIPDst(matchIp4DstPrefix);
@@ -1346,10 +1321,10 @@ public class ReactiveForwarding {
                 byte ipv6NextHeader = ipv6Packet.getNextHeader();
                 Ip6Prefix matchIp6SrcPrefix =
                         Ip6Prefix.valueOf(ipv6Packet.getSourceAddress(),
-                                          Ip6Prefix.MAX_MASK_LENGTH);
+                                Ip6Prefix.MAX_MASK_LENGTH);
                 Ip6Prefix matchIp6DstPrefix =
                         Ip6Prefix.valueOf(ipv6Packet.getDestinationAddress(),
-                                          Ip6Prefix.MAX_MASK_LENGTH);
+                                Ip6Prefix.MAX_MASK_LENGTH);
                 selectorBuilder.matchEthType(Ethernet.TYPE_IPV6)
                         .matchIPv6Src(matchIp6SrcPrefix)
                         .matchIPv6Dst(matchIp6DstPrefix);
@@ -1392,7 +1367,7 @@ public class ReactiveForwarding {
                 .add();
 
         flowObjectiveService.forward(context.inPacket().receivedFrom().deviceId(),
-                                     forwardingObjective);
+                forwardingObjective);
 
         //
         // If packetOutOfppTable
@@ -1467,7 +1442,7 @@ public class ReactiveForwarding {
 
                 Set<Path> pathsFromCurDevice =
                         topologyService.getPaths(topologyService.currentTopology(),
-                                                 curDevice, dstId);
+                                curDevice, dstId);
                 if (pickForwardPathIfPossible(pathsFromCurDevice, curLink.src().port()) != null) {
                     break;
                 } else {
@@ -1574,9 +1549,81 @@ public class ReactiveForwarding {
         }
     }
 
+    private void installFixedPath() {
+        DeviceId deviceA = DeviceId.deviceId("of:0000000f6002ff6f");
+        DeviceId deviceB = DeviceId.deviceId("of:0000000f6002f3c3");
+        DeviceId deviceC = DeviceId.deviceId("of:0000000f6002fe07");
+        DeviceId deviceD = DeviceId.deviceId("of:0000000f6002da55");
+
+    }
+
     private void changeRoute() {
         log.info("changeRoute is called");
+        /* If A's nexthop device is C then changes to D;
+         * if A's nexthop device is D then changes to C
+         */
+        DeviceId deviceA = DeviceId.deviceId("of:0000000f6002ff6f");
 
+        MacAddress macSrc = MacAddress.valueOf("A0:CE:C8:02:F1:0C");
+        MacAddress macDst = MacAddress.valueOf("A0:CE:C8:03:2F:BF");
+        MacAddress macA = MacAddress.valueOf("00:0F:60:02:FF:6F");
+        MacAddress macC = MacAddress.valueOf("00:0F:60:02:FE:07");
+        MacAddress macD = MacAddress.valueOf("00:0F:60:02:DA:55");
+        Ip4Prefix ip4SrcPrefix = Ip4Prefix.valueOf("192.168.100.1/32");
+        Ip4Prefix ip4DstPrefix = Ip4Prefix.valueOf("192.168.100.3/32");
+        PortNumber outPort = PortNumber.portNumber(1);
+        PortNumber inPort = PortNumber.portNumber(2);
 
+        TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder();
+        selectorBuilder.matchEthSrc(macSrc)
+                .matchEthDst(macDst)
+                .matchIPSrc(ip4SrcPrefix)
+                .matchIPDst(ip4DstPrefix)
+                .matchInPort(inPort)
+                .matchEthType(Ethernet.TYPE_IPV4);
+
+        TrafficTreatment treatmentNexthopD = DefaultTrafficTreatment.builder()
+                .setEthSrc(macA)
+                .setEthDst(macD)
+                .setOutput(outPort)
+                .build();
+
+        TrafficTreatment treatmentNexthopC = DefaultTrafficTreatment.builder()
+                .setEthSrc(macA)
+                .setEthDst(macC)
+                .setOutput(outPort)
+                .build();
+
+        FlowRule new_fr;
+        for (FlowRule fr : flowRuleService.getFlowEntries(deviceA)) {
+            if (fr.selector().equals(selectorBuilder.build())) {
+                if (fr.treatment().equals(treatmentNexthopD)) {
+                    log.info("Flow rule found on device A, changing next hop to C");
+                    new_fr = new DefaultFlowRule(deviceA,
+                            selectorBuilder.build(),
+                            treatmentNexthopC,
+                            DEFAULT_PRIORITY,
+                            appId,
+                            DEFAULT_TIMEOUT,
+                            false,
+                            null);
+                    flowRuleService.applyFlowRules(new_fr);
+                    flowRuleService.removeFlowRules(fr);
+                }
+                if (fr.treatment().equals(treatmentNexthopC)) {
+                    log.info("Flow rule found, changing next hop to D");
+                    new_fr = new DefaultFlowRule(deviceA,
+                            selectorBuilder.build(),
+                            treatmentNexthopD,
+                            DEFAULT_PRIORITY,
+                            appId,
+                            DEFAULT_TIMEOUT,
+                            false,
+                            null);
+                    flowRuleService.applyFlowRules(new_fr);
+                    flowRuleService.removeFlowRules(fr);
+                }
+            }
+        }
     }
 }
